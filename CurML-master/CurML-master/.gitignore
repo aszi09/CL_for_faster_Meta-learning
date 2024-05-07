@@ -1,0 +1,10 @@
+.vscode
+__pycache__
+
+/*.egg-info
+/data
+/runs*
+
+*.log
+*.txt
+run.sh
