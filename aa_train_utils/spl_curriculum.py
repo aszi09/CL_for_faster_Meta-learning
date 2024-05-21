@@ -1,11 +1,14 @@
 
+from functools import partial
+import jax
+import jax.numpy as jnp
 
+import netket as nk
+from torch.utils.data import DataLoader, Subset
 
-
-
-@jax.jit 
-def per_sample_loss(key_loss,X, y, x_test, y_test):
-    return partial(model.apply, params, beta=kl_penalty, k=num_posterior_mc, method=model.elbo)(X, y, x_test, y_test, rngs={'default': key_loss})
+@partial(jax.jit, static_argnums=0)
+def per_sample_loss(part_func, key_loss,X, y, x_test, y_test):
+    return part_func(X, y, x_test, y_test, rngs={'default': key_loss})
 
 class SPL_curriculum:
     def __init__(self, start_rate, growth_epochs, dataset, batch_size, rng):
@@ -20,7 +23,7 @@ class SPL_curriculum:
 
 
 
-    def data_curriculum(self, model, params, epoch):
+    def data_curriculum(self, loss_partial, epoch, num_context_samples):
         """ Use the model to calculate the loss for the whole dataset, 
         and then use the loss to calculate the SPL weights for the dataset
         based on the current schedule
@@ -40,7 +43,7 @@ class SPL_curriculum:
         curr_data_size = int(data_rate * self.dataset.__len__())
         print('curr_data_size', curr_data_size, "curr_data_rate", data_rate, "epoch number" , epoch) 
 
-        losses = self.calculate_difficulty_ordering(model, params)
+        losses = self.calculate_difficulty_ordering(loss_partial, num_context_samples)
         sorted_indices = jnp.argsort(losses)[:curr_data_size]
         print('sorted indices shape', sorted_indices.shape)
         self.weight_log.append(sorted_indices)
@@ -48,7 +51,7 @@ class SPL_curriculum:
         return DataLoader(Subset(self.dataset, sorted_indices), batch_size=self.batch_size, shuffle=True, drop_last=True)  # Maybe shuffle? 
         # calculate the loss over the dataset with the current model and params
     
-    def calculate_difficulty_ordering(self, model, params):
+    def calculate_difficulty_ordering(self,loss_partial, num_context_samples):
 
         """ Calculate the difficulty of the dataset based on the model and params
         """
@@ -59,12 +62,15 @@ class SPL_curriculum:
         self.rng, key_model = jax.random.split(self.rng) # might be problematic to always use the self.rng? if we reset it it should be reproducible i think
         
         key_losses = jax.random.split(key_model, self.dataset.__len__())
-        chunked_loss_f =nk.jax.vmap_chunked(per_sample_loss, in_axes=(0,0,0,0,0), chunk_size=chunk_size)
+        chunked_loss_f =nk.jax.vmap_chunked(partial(per_sample_loss, loss_partial), in_axes=(0,0,0,0,0), chunk_size=chunk_size)
 
         xs , ys =self.dataset._get_data() 
         X, x_test = jnp.split(xs, indices_or_sections=(num_context_samples, ), axis=1)
         y, y_test = jnp.split(ys, indices_or_sections=(num_context_samples, ), axis=1)
         losses = chunked_loss_f(key_losses, X, y, x_test,y_test) 
         return losses 
+
+
+
 
 

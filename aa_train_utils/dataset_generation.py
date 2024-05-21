@@ -11,7 +11,8 @@ from torch.utils.data import Subset
 import flax
 import flax.linen as nn
 
-
+import netket as nk
+import numpy as np
 
 
 from torch.utils.data import  Dataset
@@ -77,9 +78,16 @@ def uniform(
 
     return xs, ys
 
+
+
 class RegressionDataset(Dataset):
+
+    """ Dataset extension from pytorch dataset for regression data 
+        It receives a set of x and y values representing several functions
+    """
     def __init__(self, dataset):
         self.x , self.y = dataset
+
     def __len__(self):
         return  self.x.shape[0]
 
@@ -89,3 +97,47 @@ class RegressionDataset(Dataset):
     def _get_data(self):
 
         return self.x, self.y
+
+@partial(jax.jit, static_argnums=(1,2))
+def gen_sampler_datapoint(key,  sampler):
+    
+    """ Generate a single regression dataset for a function from a function sampler sampler"""    
+    x, y = sampler(key)
+    x, y = x[..., None], y[..., None]
+
+    return x,y 
+
+
+@partial(jax.jit, static_argnums=(1,2,3,4))
+def generate_dataset(rng , dataset_size, sampler, chunk_size):
+    
+    """ Generate a dataset_size number of training datapoints using chunked vmap and function sampler"""
+
+    rng_old , key = jax.random.split(rng)
+    keys = jax.random.split(rng, dataset_size)
+    # Apply the function in chunks using netket.jax.vmap_chunked
+    batched_generate = nk.jax.vmap_chunked(
+        partial(gen_sampler_datapoint,  sampler=sampler),
+        in_axes=0,
+        chunk_size=chunk_size
+    )
+    x ,y  = batched_generate(keys)
+    return  x ,y
+
+
+def generate_noisy_split_trainingdata(samplers , sampler_ratios, dataset_size, chunk_size, rng):
+    """ Generate a dataset with a split of different samplers and ratios
+    """
+
+    assert len(samplers) == len(sampler_ratios), "The number of samplers and ratios must be the same"
+    assert sum(sampler_ratios) == 1.0, "The sum of the ratios must be 1.0"
+    keys = jax.random.split(rng, len(samplers))
+    datasets = []
+    for (sampler, ratio, key) in zip(samplers, sampler_ratios, keys):
+        dataset = generate_dataset(key, int(dataset_size*ratio),  sampler, chunk_size)
+        datasets.append(np.asarray(dataset))
+
+
+
+    x_datasets, y_datasets = zip(*datasets)
+    return  np.asarray((jnp.concatenate(x_datasets), jnp.concatenate(y_datasets)))

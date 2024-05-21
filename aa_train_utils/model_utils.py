@@ -75,6 +75,6 @@ def save_model_params(params, path, name):
         pickle.dump(params, f)
 
 
-def load_model_params(path, name):
-    with open(os.path.join(path, name+'.pkl'), 'rb') as f:
+def load_model_params(filepath):
+    with open(filepath, 'rb') as f:
         return pickle.load(f)
