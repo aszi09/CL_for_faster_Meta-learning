@@ -11,7 +11,7 @@ def per_sample_loss(part_func, key_loss,X, y, x_test, y_test):
     return part_func(X, y, x_test, y_test, rngs={'default': key_loss})
 
 class SPL_curriculum:
-    def __init__(self, start_rate, growth_epochs, dataset, batch_size, rng):
+    def __init__(self, start_rate, growth_epochs, dataset, batch_size, rng, chunk_size=128):
 
         self.batch_size = batch_size
         self.start_rate = start_rate
@@ -19,7 +19,7 @@ class SPL_curriculum:
         self.dataset = dataset
         self.rng = rng
         self.weight_log = []
-
+        self.chunk_size = chunk_size
 
 
 
@@ -43,6 +43,11 @@ class SPL_curriculum:
         curr_data_size = int(data_rate * self.dataset.__len__())
         print('curr_data_size', curr_data_size, "curr_data_rate", data_rate, "epoch number" , epoch) 
 
+        # dont do unecessary sorting and loss calculation if we are already full dataset size
+        if curr_data_size == self.dataset.__len__():
+            return DataLoader(self.dataset, batch_size=self.batch_size, shuffle=True, drop_last=True)
+        
+
         losses = self.calculate_difficulty_ordering(loss_partial, num_context_samples)
         sorted_indices = jnp.argsort(losses)[:curr_data_size]
         print('sorted indices shape', sorted_indices.shape)
@@ -55,14 +60,13 @@ class SPL_curriculum:
 
         """ Calculate the difficulty of the dataset based on the model and params
         """
-        chunk_size = self.batch_size
         # currently problem since self.dataset._get_data() returns tuple of 4 arrays, but we need to return a tuple of 4 arrays for each sample, so we need to do it in a different way
         
 
         self.rng, key_model = jax.random.split(self.rng) # might be problematic to always use the self.rng? if we reset it it should be reproducible i think
         
         key_losses = jax.random.split(key_model, self.dataset.__len__())
-        chunked_loss_f =nk.jax.vmap_chunked(partial(per_sample_loss, loss_partial), in_axes=(0,0,0,0,0), chunk_size=chunk_size)
+        chunked_loss_f =nk.jax.vmap_chunked(partial(per_sample_loss, loss_partial), in_axes=(0,0,0,0,0), chunk_size=self.chunk_size)
 
         xs , ys =self.dataset._get_data() 
         X, x_test = jnp.split(xs, indices_or_sections=(num_context_samples, ), axis=1)
