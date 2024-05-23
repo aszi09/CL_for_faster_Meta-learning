@@ -13,7 +13,6 @@ from networks import MixtureNeuralProcess, MLP, MeanAggregator, SequenceAggregat
 
 from networks import MLP
 
-
 def f(
         key: flax.typing.PRNGKey,
         x: jax.Array,
@@ -65,24 +64,9 @@ def initialize_np(rng, dataset_size, test_resolution=500):
         projection_outputs
     )
 
-    rng, key = jax.random.split(rng)
-    params = model.init({'params': key, 'default': key}, xs[:, None], ys[:, None], xs[:3, None])
+    rng, key1, key2 = jax.random.split(rng, 3)
+    params = model.init({'params': key1, 'default': key2}, xs[:, None], ys[:, None], xs[:3, None])
     return model, params
-
-
-# def initialize_screenernet(layer_widths, key):
-# params = []
-# keys = jax.random.split(parent_key, num=len(layer_widths) - 1)
-#
-# for in_width, out_width, key in zip(layer_widths[:-1], layer_widths[1:], keys):
-#     weight_key, bias_key = jax.random.split(key)
-#     params.append([
-#         scale * jax.random.normal(weight_key, shape=(out_width, in_width)),
-#         scale * jax.random.normal(bias_key, shape=(out_width,))
-#     ]
-#     )
-#
-# return params
 
 
 def batch_to_screenernet_input(xs, ys):
@@ -100,45 +84,6 @@ def initialize_optimizer(params):
     opt_state = optimizer.init(params)
     return optimizer, opt_state
 
-
-# class ScreenerNet_NP():
-#     """ScreenerNet_NP CL Algorithm.
-#
-#     Screenernet: Learning self-paced curriculum for deep neural networks. https://arxiv.org/pdf/1801.00904
-#     """
-#
-#     def __init__(self, dataset_size, batch_size, context_size, num_epochs, data_loader, kl_penalty,
-#                  num_posterior_mc, rng):
-#         # self.batch_size = batch_size
-#         # self.context_size = context_size
-#         # self.num_epochs = num_epochs
-#         # self.rng = rng
-#         # self.np_model, self.np_params = initialize_np(self.get_key(), dataset_size)
-#         # self.screenernet = initialize_screenernet([2*context_size, 128, 128, 1], self.get_key())
-#         # self.data_loader = data_loader
-#         # self.weights = jnp.zeros(dataset_size)
-#         # self.kl_penalty = kl_penalty
-#         # self.num_posterior_mc = num_posterior_mc
-#         # self.optimizer, self.opt_state = initialize_optimizer(self.np_params)
-
-# def screenernet_predict_task(screenernet_params, x):
-#     hidden_layers = screenernet_params[:-1]
-#     activation = x
-#     for w, b in hidden_layers:
-#         activation = jax.nn.relu(jnp.dot(w, activation) + b)
-#     w_last, b_last = screenernet_params[-1]
-#     output = jnp.dot(w_last, activation) + b_last
-#     return jax.nn.sigmoid(output)
-#
-#
-# def screenernet_predict_batch(screenernet_params, xs_context, ys_context):
-#     """
-#     Predicts the weight for one batch of tasks, with each task represented as context x ++ context y
-#     """
-#     batched_predict = jax.vmap(screenernet_predict_task, in_axes=(None, 0))
-#     screenernet_input = batch_to_screenernet_input(xs_context, ys_context)
-#     return batched_predict(screenernet_params, screenernet_input)
-
 def screenernet_loss(screenernet, screenernet_input, apply_fn, losses):
     """
     Computes the objective loss of ScreenerNet.
@@ -153,10 +98,11 @@ def screenernet_loss(screenernet, screenernet_input, apply_fn, losses):
 
     loss_screenernet = 0.0
     loss_screenernet = jax.lax.fori_loop(0, len(losses), body_fun, loss_screenernet)
+    loss_screenernet = loss_screenernet * (1 / len(losses))
     return loss_screenernet
 
 
-# @partial(jax.jit, static_argnums=(0, 1, 2))
+@partial(jax.jit, static_argnums=(0, 1, 2, 9, 10))
 def np_losses_batch(apply_fn, elbo_fn, f_size, np_params, xs_context, ys_context, xs_target, ys_target,
                     key, kl_penalty, num_posterior_mc):
     """
@@ -174,7 +120,7 @@ def np_losses_batch(apply_fn, elbo_fn, f_size, np_params, xs_context, ys_context
     return elbos
 
 
-# @partial(jax.jit, static_argnums=(0, 1))
+@partial(jax.jit, static_argnums=(0, 1, 2, 10, 11))
 def np_weighted_loss(apply_fn, elbo_fn, f_size, np_params, weights, xs_context, ys_context, xs_target,
                      ys_target, key, kl_penalty, num_posterior_mc):
     """
@@ -185,7 +131,7 @@ def np_weighted_loss(apply_fn, elbo_fn, f_size, np_params, weights, xs_context, 
     return -jnp.multiply(elbos, weights).mean()
 
 
-# @partial(jax.jit, static_argnums=(0, 1, 11))
+@partial(jax.jit, static_argnums=(0, 1, 2, 11, 12, 13))
 def update_np(
         apply_fn,
         elbo_fn,
@@ -225,6 +171,10 @@ def update_screenernet(tx, screenernet_opt, screenernet_input, apply_fn, screene
     return loss_val, screenernet
 
 
+def normalize_array(x, m, M):
+    return (x - m) / (M - m)
+
+
 def train(dataloader, dataset_size, context_size, num_epochs, rng, kl_penalty, num_posterior_mc):
     """
     Performs training of the NP and ScreenerNet.
@@ -236,23 +186,29 @@ def train(dataloader, dataset_size, context_size, num_epochs, rng, kl_penalty, n
     dummy = jax.random.normal(key, (2 * context_size,))
     screenernet_params = sn_model.init(key, dummy)
     optimizer, opt_state = initialize_optimizer(np_params)
-    tx = optax.adam(learning_rate=0.1)
+    tx = optax.adam(learning_rate=1e-3)
     sn_opt_state = tx.init(screenernet_params)
     data_iter = iter(dataloader)
     best, best_params = jnp.inf, np_params
     np_losses = list()
     for _ in (pbar := tqdm.trange(num_epochs, desc='Optimizing params. ')):
         batch = next(data_iter)
-        batch = jax.tree_map(lambda tensor: tensor.numpy(), batch)
+        batch = jax.tree_util.tree_map(lambda tensor: tensor.numpy(), batch)
         xs_context, ys_context, xs_target, ys_target = batch
         screenernet_input = batch_to_screenernet_input(xs_context, ys_context)
         key, rng = jax.random.split(rng)
-        losses = jnp.abs(np_losses_batch(np_model.apply, np_model.elbo, 2 * context_size, np_params,
+        losses = np_losses_batch(np_model.apply, np_model.elbo, 2 * context_size, np_params,
                                          xs_context, ys_context, xs_target, ys_target,
-                                         key, kl_penalty=kl_penalty, num_posterior_mc=num_posterior_mc))
+                                         key, kl_penalty=kl_penalty, num_posterior_mc=num_posterior_mc)
+        # TODO: what should be their range and how should they be interpreted?
+        loss_np = -losses.mean()
+        losses = (losses - jnp.min(losses, axis=None)) / (jnp.max(losses, axis=None) - jnp.min(losses, axis=None)) # TODO: better normalization
         weights = sn_model.apply(screenernet_params, screenernet_input).flatten()
+        sum_weights = jnp.sum(weights, axis=None)
+        if sum_weights != 0:
+          weights = (1 / sum_weights) * weights
         rng, key = jax.random.split(rng)
-        np_params, opt_state, loss_np = update_np(np_model.apply, np_model.elbo, 2 * context_size, np_params, opt_state,
+        np_params, opt_state, loss_np_weighted = update_np(np_model.apply, np_model.elbo, 2 * context_size, np_params, opt_state,
                                                   weights, xs_context, ys_context, xs_target, ys_target, key, optimizer,
                                                   kl_penalty, num_posterior_mc)
         loss_sn, screenernet_params = update_screenernet(tx, sn_opt_state, screenernet_input,
