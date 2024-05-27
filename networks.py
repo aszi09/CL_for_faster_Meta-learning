@@ -286,6 +286,49 @@ class MixtureNeuralProcess(nn.Module):
         
         return log_likelihood - beta * kl_div
 
+    def err(
+            self,
+            X: jax.Array,
+            y: jax.Array,
+            x_test: jax.Array,
+            y_test: jax.Array,
+            k: int = 10,
+            beta: float = 1.0
+    ) -> jax.Array:
+        """
+        Squared error / model variance
+        """
+
+        full_X = jnp.concatenate([X, x_test], axis=0)
+        full_Y = jnp.concatenate([y, y_test], axis=0)
+
+        # NP Posterior
+        mu_z, scale_z = self.posterior(full_X, full_Y)
+
+        # NP Prior (treated as a constant in the optimization)
+        mu_prior, scale_prior = self.posterior(X, y)
+        mu_prior, scale_prior = jax.tree_map(jax.lax.stop_gradient, (mu_prior, scale_prior))
+        scale_prior = scale_prior + 1.0
+
+        # Monte-Carlo on NP Posterior
+        epsilon = jax.random.normal(self.make_rng(), shape=(k, len(mu_z)))
+        zs = mu_z + scale_z * epsilon
+
+        # Combine latent and deterministic path
+        zs = jnp.concatenate([zs, jnp.broadcast_to(mu_z, zs.shape)], -1)
+
+        # Predictive of dim: 2 x (len(x_test), k, *dim(y_test))
+        mu_out, scale_out = self.predictive(zs, x_test)
+
+        # Compute empirical cross-entropy for each component k
+        y_test = jnp.broadcast_to(
+            y_test.reshape(len(y_test), 1, *y_test.shape[1:]),
+            mu_out.shape
+        )
+        err = jnp.square((y_test - mu_out) / scale_out)
+        err = err.reshape(-1)
+        return err
+
     @nn.compact
     def __call__(self, X, y, x_test, k: int = 10) -> tuple[jax.Array, jax.Array]:
         """Joint call to p(Z | X, Y) and p(y | Z, x)"""
