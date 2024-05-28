@@ -14,6 +14,7 @@ from aa_train_utils.spl_curriculum import SPL_curriculum
 import jax
 import jax.numpy as jnp
 import jax.tree_util
+from jax.scipy.stats.norm import logpdf
 import pickle
 from torch.utils.data import Dataset
 from torch.utils.data import Subset
@@ -44,24 +45,25 @@ from torch.utils import data
 
 
 
-def cross_entropy_error(model, params, x_context, y_context, x_target, y_target, rng, k):
 
-    # Lets compute the model application, 
+def cross_entropy_error(model, params, x_context, y_context, x_target, y_target , rng , k):
     full_x = jnp.concatenate([x_context, x_target])
-    y_means, y_stds = model.apply(params, x_context, y_context, full_x,k=1, rngs={'default': rng}) 
-    
+    y_means, y_stds = model.apply(params, x_context, y_context, full_x,k=k, rngs={'default': rng})
+
     full_y = jnp.concatenate([y_context, y_target])
+
     # Lets compute the log likelihood of the target points given the means and stds
-    log_probs = -0.5 * ((full_y- y_means)**2 / y_stds**2 + jnp.log(2 * jnp.pi * y_stds**2))
-    log_likelihood = log_probs.mean()
-    
-    return log_likelihood
+
+    #print(full_y.shape, y_means.shape, y_stds.shape, "printing the shapes, they should be just an array of values")
+    log_pdf = logpdf(full_y, jnp.squeeze(y_means),jnp.squeeze(y_stds)) 
+    return -jnp.mean(log_pdf)
+
 
 
 def RMSE_means(model, params, x_context, y_context, x_target, y_target, rng, k):
     
     full_x = jnp.concatenate([x_context, x_target])
-    y_means, y_stds = model.apply(params, x_context, y_context, full_x,k=1, rngs={'default': rng}) 
+    y_means, y_stds = model.apply(params, x_context, y_context, full_x,k=k, rngs={'default': rng}) 
     
     full_y = jnp.concatenate([y_context, y_target])
     
@@ -71,11 +73,12 @@ def RMSE_means(model, params, x_context, y_context, x_target, y_target, rng, k):
 def STD_residuals(model, params, x_context, y_context, x_target, y_target, rng, k):
     
     full_x = jnp.concatenate([x_context, x_target])
-    y_means, y_stds = model.apply(params, x_context, y_context, full_x,k=1, rngs={'default': rng}) 
+    y_means, y_stds = model.apply(params, x_context, y_context, full_x,k=k, rngs={'default': rng}) 
     
     full_y = jnp.concatenate([y_context, y_target])
 
-    return (full_y - y_means) / y_stds 
+    return abs(full_y - y_means) / y_stds 
+
 
 
 def train_spl_curriculum(dataset_key_int,dataloader_key_int, dataset_size, training_step_number, eval_dataset_size, eval_intervals, sampler_ratios, chunk_size, save_path ,  model_name, start_rate, growth_epochs):
@@ -220,29 +223,14 @@ def train_spl_curriculum(dataset_key_int,dataloader_key_int, dataset_size, train
 
 
         batches = jnp.asarray( jax.tree_util.tree_map(lambda tensor : tensor.numpy(), [batch for batch in spl_curricula.data_curriculum(model_partial_loss_function, i, num_context_samples)]))
-        # params_new, opt_state, loss = step(params, opt_state, key)
-        
-        # Right now the number of batches might lead us to over train for the training_step_number, or overtrain for the eval_intervals
-
-        # First take care of the case where we might be overtraining for the eval_intervals. 
-
         batches_until_eval = eval_intervals - (training_steps % eval_intervals)
         batches_until_end = training_step_number - training_steps
         if batches_until_end < len(batches):
             batches = batches[:batches_until_end]
 
-        # If the batches until eval is less than the batches until end, we eval, then train until batches_until_end - batches_until_eval
-        # If the batches until eval is more than the batches until end, we train batches_until_end
-        # if the batches until eval is == to batches_until_end, we eval and then let the training end.
-        # If the batches until eval is less than the batches until end , but the batches_until_end - (len(batches) - batches_until_eval) is less than 0, we train the rest of the batches and end the training.
-        # if the batches_until_end is negative or 0 we break the training loop.  
-        print("batches_until_eval", batches_until_eval, "batches_until_end", batches_until_end, "len(batches)", len(batches), "training_steps", training_steps )
+        #print("batches_until_eval", batches_until_eval, "batches_until_end", batches_until_end, "len(batches)", len(batches), "training_steps", training_steps )
 
-        # Okay so if the eval period can fit inside multiple times into a len(batches) it should be run that many times. 
-        # It can be done so if 
-        # if the len(batches) / eval_intervals is larger than 2 . 
-
-
+        
         if batches_until_eval < len(batches):
             # then get the slice to make up the eval_intervals
             
@@ -255,7 +243,7 @@ def train_spl_curriculum(dataset_key_int,dataloader_key_int, dataset_size, train
             for i in range(0,1+((len(batches)-batch_slice_pre_eval) // eval_intervals)):
                 
 
-                print("current eval loop number", i , "currently trained steps within eval", trained_steps_within_eval , "current batch slice", (trained_steps_within_eval, (trained_steps_within_eval+batch_slice)) ) 
+                #print("current eval loop number", i , "currently trained steps within eval", trained_steps_within_eval , "current batch slice", (trained_steps_within_eval, (trained_steps_within_eval+batch_slice)) ) 
                 params_new, opt_state, loss_arr = scan_train(params_new, opt_state, key,batches[trained_steps_within_eval:(trained_steps_within_eval+batch_slice)])
 
                 loss_array_eval.extend(loss_arr)  # dont lose the loss values upon next batch training
@@ -301,11 +289,11 @@ def train_spl_curriculum(dataset_key_int,dataloader_key_int, dataset_size, train
             
             # with trained_steps_within_eval start slicing, only train if len(batches) - trained_steps_within_eval > 0
             if len(batches) - trained_steps_within_eval > 0: 
-                print("training on the rest of the remaining batches after eval", len(batches)-trained_steps_within_eval)
+                #print("training on the rest of the remaining batches after eval", len(batches)-trained_steps_within_eval)
                 params_new , opt_state, loss_arr = scan_train(params_new, opt_state, key,batches[trained_steps_within_eval:])
                 loss_array_eval.extend(loss_arr)
-            else:
-                print("Eval period was the last period, no more training, eval intervals fit perfectly within this batch.")
+            #else: 
+                #print("Eval period was the last period, no more training, eval intervals fit perfectly within this batch.")
 
             
             loss_arr = jnp.asarray(loss_array_eval)
@@ -315,7 +303,7 @@ def train_spl_curriculum(dataset_key_int,dataloader_key_int, dataset_size, train
         # Update the training steps
         # Since this variable is only used inside the function and never later , it doesnt matter for the training_step_number restriction if it overcounts.  
         # Although it would so pay attention if implementation changes.
-        print(training_steps, len(batches))
+        #print(training_steps, len(batches))
         training_steps+= len(batches)
 
     

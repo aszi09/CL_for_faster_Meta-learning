@@ -27,7 +27,7 @@ from torch.utils import data
 
 
 f1 = Fourier(n=4, amplitude=.5, period=1.0)
-f2 = Fourier(n=2, amplitude=1.5, period=1.2, period_range=.5)
+f2 = Fourier(n=2, amplitude=1.5, period=1.0, period_range=.2)
 f3 = Fourier(n=6, amplitude=.5, period=2.0)
 f4 = Fourier(n=3, amplitude=1.0, period=2.0)
 
@@ -35,7 +35,7 @@ f4 = Fourier(n=3, amplitude=1.0, period=2.0)
 # Used for training and intra train evaluation.
 
 f5 = Shift(Fourier(n=2, amplitude=0.5, period=1, period_range=0.2), x_shift=0.0, x_shift_range=1.5, y_shift=0.0, y_shift_range=3.0)
-f6 = Fourier(n=2, amplitude= 1.5, period= 1.2, period_range= 0.5)
+f6 = Fourier(n=2, amplitude= 1.5, period= 1.0, period_range= 0.2)
 
 m = Mixture([Shift(f1, y_shift=-2), Shift(f2, y_shift=0.0), Shift(f3, y_shift=2)])
 nm = Mixture([WhiteNoise(m.branches[0], 0.05), WhiteNoise(m.branches[1], 0.2), WhiteNoise(m.branches[2], 0.1)])
@@ -118,7 +118,7 @@ class RegressionDataset(Dataset):
 
         return self.x, self.y
 
-@partial(jax.jit, static_argnums=(1,2))
+@partial(jax.jit, static_argnums=(1))
 def gen_sampler_datapoint(key,  sampler):
     
     """ Generate a single regression dataset for a function from a function sampler sampler"""    
@@ -128,7 +128,6 @@ def gen_sampler_datapoint(key,  sampler):
     return x,y 
 
 
-@partial(jax.jit, static_argnums=(1,2,3,4))
 def generate_dataset(rng , dataset_size, sampler, chunk_size):
     
     """ Generate a dataset_size number of training datapoints using chunked vmap and function sampler"""
