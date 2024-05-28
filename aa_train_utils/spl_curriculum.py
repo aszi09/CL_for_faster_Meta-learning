@@ -19,6 +19,7 @@ class SPL_curriculum:
         self.dataset = dataset
         self.rng = rng
         self.weight_log = []
+        self.epoch_losses_log = []
         self.chunk_size = chunk_size
 
 
@@ -52,6 +53,7 @@ class SPL_curriculum:
         sorted_indices = jnp.argsort(losses)[:curr_data_size]
         print('sorted indices shape', sorted_indices.shape)
         self.weight_log.append(sorted_indices)
+        self.epoch_losses_log.append(losses)
 
         return DataLoader(Subset(self.dataset, sorted_indices), batch_size=self.batch_size, shuffle=True, drop_last=True)  # Maybe shuffle? 
         # calculate the loss over the dataset with the current model and params

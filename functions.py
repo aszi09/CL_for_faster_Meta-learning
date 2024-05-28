@@ -18,21 +18,38 @@ class WhiteNoise(nn.Module):
 
 class Shift(nn.Module):
     module: nn.Module
-    x_shift: None = None
-    y_shift: None = None
+    x_shift: float = 0.0
+    y_shift: float = 0.0
+    x_shift_range: float = 0.0
+    y_shift_range: float = 0.0
     
     @nn.compact
     def __call__(self, x: jax.typing.ArrayLike) -> jax.Array:
-        if self.x_shift:
-            x = x + self.x_shift
+        # Initialize x_shift and y_shift if shift ranges are specified
+        if self.x_shift_range > 0:
+            x_shift = self.param(
+                'x_shift', 
+                nn.initializers.uniform(scale=self.x_shift_range * 2),
+                x.shape
+            ) - self.x_shift_range
+        else:
+            x_shift = self.x_shift
 
-        out = self.module(x)
-
-        if self.y_shift:
-            out = out + self.y_shift
-
-        return out
+        if self.y_shift_range > 0:
+            y_shift = self.param(
+                'y_shift', 
+                nn.initializers.uniform(scale=self.y_shift_range * 2),
+                x.shape
+            ) - self.y_shift_range
+        else:
+            y_shift = self.y_shift
         
+        # Apply shifts
+        x = x + x_shift
+        out = self.module(x)
+        out = out + y_shift
+        
+        return out
 
 class Slope(nn.Module):
     """Generate Linear Functions with random slopes."""
@@ -68,6 +85,7 @@ class Fourier(nn.Module):
     n: int = 3
     amplitude: float = 1.0
     period: float = 1.0
+    period_range: float = 0.5
 
     @nn.compact
     def __call__(self, x: jax.typing.ArrayLike) -> jax.Array:
@@ -87,13 +105,24 @@ class Fourier(nn.Module):
             (self.n - 1, *jnp.shape(x)), x.dtype
         )
 
+        period_shift = self.param(
+            'period_shift',
+            nn.initializers.uniform(scale=self.period_range*2.0),
+            (), x.dtype
+        ) - self.period_range
+
+        period = self.period + period_shift
         x = x - shift
 
         # (heuristic) Monotonically scale amplitudes.
         a = a * jnp.arange(1, len(a) + 1) / (self.n - 1)
 
+        # randomise the period a bit , within a given range of 1 , based on the period inputted. 
+
+
+
         waves = jnp.cos(
-            (2 * jnp.pi * jnp.arange(1, self.n) * x - phase) / self.period
+            (2 * jnp.pi * jnp.arange(1, self.n) * x - phase) / period
         )
 
         return a[0] / 2.0 + jnp.sum(a[1:] * waves)

@@ -27,14 +27,34 @@ from torch.utils import data
 
 
 f1 = Fourier(n=4, amplitude=.5, period=1.0)
-f2 = Fourier(n=2, amplitude=.5, period=1.0)
+f2 = Fourier(n=2, amplitude=1.5, period=1.2, period_range=.5)
 f3 = Fourier(n=6, amplitude=.5, period=2.0)
 f4 = Fourier(n=3, amplitude=1.0, period=2.0)
+
+
+# Used for training and intra train evaluation.
+
+f5 = Shift(Fourier(n=2, amplitude=0.5, period=1, period_range=0.2), x_shift=0.0, x_shift_range=1.5, y_shift=0.0, y_shift_range=3.0)
+f6 = Fourier(n=2, amplitude= 1.5, period= 1.2, period_range= 0.5)
 
 m = Mixture([Shift(f1, y_shift=-2), Shift(f2, y_shift=0.0), Shift(f3, y_shift=2)])
 nm = Mixture([WhiteNoise(m.branches[0], 0.05), WhiteNoise(m.branches[1], 0.2), WhiteNoise(m.branches[2], 0.1)])
 
 rng = jax.random.key(0)
+
+def f(
+    key: flax.typing.PRNGKey, 
+    x: jax.Array, 
+    noise_scale: float = 0.2, 
+    mixture_prob: float = 0.5, 
+    corrupt: bool = True
+):
+    key_noise, key_mixture = jax.random.split(key)
+    
+    noise = jax.random.normal(key, x.shape) * noise_scale
+
+    # return choice * (jnp.sin(2 * jnp.pi * x / 2)) + (1 - choice) * (jnp.cos(2 * jnp.pi * 2 * x)) + corrupt * noise
+    return(-2-jnp.cos(2 * jnp.pi * x)) + corrupt * noise
 
 
 
