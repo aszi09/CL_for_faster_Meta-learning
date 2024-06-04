@@ -325,7 +325,7 @@ class MixtureNeuralProcess(nn.Module):
             y_test.reshape(len(y_test), 1, *y_test.shape[1:]),
             mu_out.shape
         )
-        err = jnp.abs((y_test - mu_out) / scale_out).mean(axis=None)
+        err = (scale_out + jnp.abs((y_test - mu_out) / scale_out)).mean(axis=None)
         return err
 
     @nn.compact
