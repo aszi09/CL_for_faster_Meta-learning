@@ -42,7 +42,6 @@ class SPL_curriculum:
 
         
         curr_data_size = int(data_rate * self.dataset.__len__())
-        print('curr_data_size', curr_data_size, "curr_data_rate", data_rate, "epoch number" , epoch) 
 
         # dont do unecessary sorting and loss calculation if we are already full dataset size
         if curr_data_size == self.dataset.__len__():
@@ -51,7 +50,6 @@ class SPL_curriculum:
 
         losses = self.calculate_difficulty_ordering(loss_partial, num_context_samples)
         sorted_indices = jnp.argsort(losses)[:curr_data_size]
-        print('sorted indices shape', sorted_indices.shape)
         self.weight_log.append(sorted_indices)
         self.epoch_losses_log.append(losses)
 
