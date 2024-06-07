@@ -71,7 +71,7 @@ def create_model(rng):
 
 def save_model_params(params, path, name):
     os.makedirs(path, exist_ok=True)
-    with open(os.path.join(path, name+'.pkl'), 'wb') as f:
+    with open(os.path.join(path, name+'_best_end_params.pkl'), 'wb') as f:
         pickle.dump(params, f)
 
 
